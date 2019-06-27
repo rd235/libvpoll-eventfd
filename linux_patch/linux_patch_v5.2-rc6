@@ -1,0 +1,196 @@
+diff --git a/fs/eventfd.c b/fs/eventfd.c
+index 8aa0ea8c55e8..6cdb1b854341 100644
+--- a/fs/eventfd.c
++++ b/fs/eventfd.c
+@@ -24,18 +24,32 @@
+ #include <linux/seq_file.h>
+ #include <linux/idr.h>
+ 
++#define EPOLLALLMASK64 ((__force __u64)EPOLLALLMASK)
++
+ static DEFINE_IDA(eventfd_ida);
+ 
+ struct eventfd_ctx {
+ 	struct kref kref;
+ 	wait_queue_head_t wqh;
+ 	/*
+-	 * Every time that a write(2) is performed on an eventfd, the
+-	 * value of the __u64 being written is added to "count" and a
+-	 * wakeup is performed on "wqh". A read(2) will return the "count"
+-	 * value to userspace, and will reset "count" to zero. The kernel
+-	 * side eventfd_signal() also, adds to the "count" counter and
+-	 * issue a wakeup.
++	 * If the EFD_VPOLL flag was NOT set at eventfd creation:
++	 *   Every time that a write(2) is performed on an eventfd, the
++	 *   value of the __u64 being written is added to "count" and a
++	 *   wakeup is performed on "wqh". A read(2) will return the "count"
++	 *   value to userspace, and will reset "count" to zero (or decrement
++	 *   "count" by 1 if the flag EFD_SEMAPHORE has been set). The kernel
++	 *   side eventfd_signal() also, adds to the "count" counter and
++	 *   issue a wakeup.
++	 *
++	 * If the EFD_VPOLL flag was set at eventfd creation:
++	 *   count is the set of pending EPOLL events.
++	 *   read(2) returns the current value of count.
++	 *   The argument of write(2) is an 8-byte integer:
++	 *   it is an or-composition of a control command (EFD_VPOLL_ADDEVENTS,
++	 *   EFD_VPOLL_DELEVENTS or EFD_VPOLL_MODEVENTS) and the bitmap of
++	 *   events to be added, deleted to the current set of pending events.
++	 *   (i.e. which bits of "count" must be set or reset).
++	 *   EFD_VPOLL_MODEVENTS redefines the set of pending events.
+ 	 */
+ 	__u64 count;
+ 	unsigned int flags;
+@@ -295,6 +309,78 @@ static ssize_t eventfd_write(struct file *file, const char __user *buf, size_t c
+ 	return res;
+ }
+ 
++static __poll_t eventfd_vpoll_poll(struct file *file, poll_table *wait)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	__poll_t events = 0;
++	u64 count;
++
++	poll_wait(file, &ctx->wqh, wait);
++
++	count = READ_ONCE(ctx->count);
++
++	events = (((__force __poll_t)count) & EPOLLALLMASK);
++
++	return events;
++}
++
++static ssize_t eventfd_vpoll_read(struct file *file, char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	ssize_t res;
++	__u64 ucnt = 0;
++
++	if (count < sizeof(ucnt))
++		return -EINVAL;
++	res = sizeof(ucnt);
++	ucnt = READ_ONCE(ctx->count);
++	if (put_user(ucnt, (__u64 __user *)buf))
++		return -EFAULT;
++
++	return res;
++}
++
++static ssize_t eventfd_vpoll_write(struct file *file, const char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	ssize_t res;
++	__u64 ucnt;
++	__u32 events;
++
++	if (count < sizeof(ucnt))
++		return -EINVAL;
++	if (copy_from_user(&ucnt, buf, sizeof(ucnt)))
++		return -EFAULT;
++	spin_lock_irq(&ctx->wqh.lock);
++
++	events = ucnt & EPOLLALLMASK64;
++	res = sizeof(ucnt);
++	switch (ucnt & ~EPOLLALLMASK64) {
++	case EFD_VPOLL_ADDEVENTS:
++		ctx->count |= events;
++		break;
++	case EFD_VPOLL_DELEVENTS:
++		ctx->count &= ~(events);
++		break;
++	case EFD_VPOLL_MODEVENTS:
++		ctx->count = (ctx->count & ~EPOLLALLMASK64) | events;
++		break;
++	default:
++		res = -EINVAL;
++	}
++
++	/* wake up waiting threads */
++	if (res >= 0 && waitqueue_active(&ctx->wqh))
++		wake_up_locked_poll(&ctx->wqh, ((__force __poll_t)ctx->count) & EPOLLALLMASK);
++
++	spin_unlock_irq(&ctx->wqh.lock);
++
++	return res;
++
++}
++
+ #ifdef CONFIG_PROC_FS
+ static void eventfd_show_fdinfo(struct seq_file *m, struct file *f)
+ {
+@@ -319,6 +405,17 @@ static const struct file_operations eventfd_fops = {
+ 	.llseek		= noop_llseek,
+ };
+ 
++static const struct file_operations eventfd_vpoll_fops = {
++#ifdef CONFIG_PROC_FS
++	.show_fdinfo	= eventfd_show_fdinfo,
++#endif
++	.release	= eventfd_release,
++	.poll		= eventfd_vpoll_poll,
++	.read		= eventfd_vpoll_read,
++	.write		= eventfd_vpoll_write,
++	.llseek		= noop_llseek,
++};
++
+ /**
+  * eventfd_fget - Acquire a reference of an eventfd file descriptor.
+  * @fd: [in] Eventfd file descriptor.
+@@ -391,6 +488,7 @@ EXPORT_SYMBOL_GPL(eventfd_ctx_fileget);
+ static int do_eventfd(unsigned int count, int flags)
+ {
+ 	struct eventfd_ctx *ctx;
++	const struct file_operations *fops = &eventfd_fops;
+ 	int fd;
+ 
+ 	/* Check the EFD_* constants for consistency.  */
+@@ -410,7 +508,11 @@ static int do_eventfd(unsigned int count, int flags)
+ 	ctx->flags = flags;
+ 	ctx->id = ida_simple_get(&eventfd_ida, 0, 0, GFP_KERNEL);
+ 
+-	fd = anon_inode_getfd("[eventfd]", &eventfd_fops, ctx,
++	if (flags & EFD_VPOLL) {
++		fops = &eventfd_vpoll_fops;
++		ctx->count &= EPOLLALLMASK64;
++	}
++	fd = anon_inode_getfd("[eventfd]", fops, ctx,
+ 			      O_RDWR | (flags & EFD_SHARED_FCNTL_FLAGS));
+ 	if (fd < 0)
+ 		eventfd_free_ctx(ctx);
+diff --git a/include/linux/eventfd.h b/include/linux/eventfd.h
+index ffcc7724ca21..5b1e6ef56651 100644
+--- a/include/linux/eventfd.h
++++ b/include/linux/eventfd.h
+@@ -21,11 +21,16 @@
+  * shared O_* flags.
+  */
+ #define EFD_SEMAPHORE (1 << 0)
++#define EFD_VPOLL (1 << 1)
+ #define EFD_CLOEXEC O_CLOEXEC
+ #define EFD_NONBLOCK O_NONBLOCK
+ 
+ #define EFD_SHARED_FCNTL_FLAGS (O_CLOEXEC | O_NONBLOCK)
+-#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE)
++#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE | EFD_VPOLL)
++
++#define EFD_VPOLL_ADDEVENTS (1ULL << 32)
++#define EFD_VPOLL_DELEVENTS (2ULL << 32)
++#define EFD_VPOLL_MODEVENTS (3ULL << 32)
+ 
+ struct eventfd_ctx;
+ struct file;
+diff --git a/include/uapi/linux/eventpoll.h b/include/uapi/linux/eventpoll.h
+index 8a3432d0f0dc..814de6d869c7 100644
+--- a/include/uapi/linux/eventpoll.h
++++ b/include/uapi/linux/eventpoll.h
+@@ -41,6 +41,8 @@
+ #define EPOLLMSG	(__force __poll_t)0x00000400
+ #define EPOLLRDHUP	(__force __poll_t)0x00002000
+ 
++#define EPOLLALLMASK	((__force __poll_t)0x0fffffff)
++
+ /* Set exclusive wakeup mode for the target file descriptor */
+ #define EPOLLEXCLUSIVE	((__force __poll_t)(1U << 28))
+ 
