@@ -127,6 +127,7 @@ static int vpollemu_ctl(int fd, int op, uint32_t events) {
 			break;
 		case VPOLL_CTL_SETEVENTS: 
 			emu_update_events(fd, *datafd, events, ~events);
+			break;
 		default: errno = EINVAL;
 						 return -1;
 	}
