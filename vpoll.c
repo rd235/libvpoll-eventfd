@@ -39,7 +39,8 @@ int vpoll_create(uint32_t init_events, int flags) {
 	if (__builtin_expect(fdtable != NULL, 0))
 		return vpollemu_create(init_events, flags);
 	else
-		return eventfd(0, EFD_VPOLL);
+		return eventfd(0, EFD_VPOLL |
+				(flags & FD_CLOEXEC ? EFD_CLOEXEC : 0));
 }
 
 int vpoll_close(int fd) {
@@ -54,7 +55,7 @@ int vpoll_ctl(int fd, int op, uint32_t events) {
 		return vpollemu_ctl(fd, op, events);
 	else {
 		uint64_t request = (((uint64_t) op) << 32) | events;
-		return write(fd, &request, sizeof(request));
+		return write(fd, &request, sizeof(request)) >= 0 ? 0 : -1;
 	}
 }
 

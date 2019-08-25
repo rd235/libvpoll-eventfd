@@ -29,3 +29,4 @@ install(FILES vpoll.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vpoll.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
+add_subdirectory(man)
