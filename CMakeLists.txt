@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.12)
 project(vpoll
 		VERSION 0.0.1
 		DESCRIPTION "generate synthetic events for poll/select/ppoll/pselect/epoll"
@@ -6,13 +6,12 @@ project(vpoll
 include(GNUInstallDirs)
 add_definitions(-D_GNU_SOURCE)
 
-unset(FDUSERDATA_LIB CACHE)
-find_library(FDUSERDATA_LIB fduserdata)
-if(NOT FDUSERDATA_LIB)
-  message(FATAL_ERROR "fduserdata library not found")
-endif()
-
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+if (PROJECT_INCLUDEDIR)
+  include_directories(${PROJECT_INCLUDEDIR})
+  execute_process(COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/vpoll.h ${PROJECT_INCLUDEDIR}/.)
+endif (PROJECT_INCLUDEDIR)
+
 set(LIBRARY_OUTPUT_PATH ${CMAKE_BINARY_DIR}/lib)
 
 set(VPOLL_SOURCES vpoll.c)
@@ -27,6 +26,6 @@ configure_file(vpoll.pc.in vpoll.pc @ONLY)
 
 install(TARGETS vpoll LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(FILES vpoll.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES ${CMAKE_BINARY_DIR}/vpoll.pc
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vpoll.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
