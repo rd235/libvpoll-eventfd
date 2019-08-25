@@ -29,7 +29,7 @@ else(NOT RONN)
 		list(APPEND MAN_FILES ${VU_BUILD_NAMEPAGE})
 	endforeach(VU_RONN_PATH)
 
-	add_custom_target(man ALL DEPENDS ${MAN_FILES})
+	add_custom_target(${PROJECT_NAME}_man ALL DEPENDS ${MAN_FILES})
 
 	foreach(MAN_CHAPTER IN ITEMS 1 2 3 4 5 6 7 8)
 # split the MAN_FILES in chapter lists
