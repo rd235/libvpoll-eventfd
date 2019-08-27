@@ -60,18 +60,21 @@ int vpoll_ctl(int fd, int op, uint32_t events) {
 }
 
 /************************************ emulation mode ************************************/
+static inline void ignore_return(int v) {
+}
+
 static void emu_update_events(int fd, int datafd, uint32_t turnon, uint32_t turnoff) {
 	char buf[4];
 	//printf("%x %x\n", turnon, turnoff);
 	if (turnon & EPOLLIN)
-		write(datafd, "", 1);
+		ignore_return(write(datafd, "", 1));
 	if (turnon & EPOLLOUT)
-		read(datafd, buf, 4);
+		ignore_return(read(datafd, buf, 4));
 	if (turnoff & EPOLLIN)
-		read(fd, buf, 4);
+		ignore_return(read(fd, buf, 4));
 	if (turnoff & EPOLLOUT) {
-		write(fd, "", 1);
-		write(fd, "", 1);
+		ignore_return(write(fd, "", 1));
+		ignore_return(write(fd, "", 1));
 	}
 	if (turnon & EPOLLHUP)
 		shutdown(datafd, SHUT_RDWR);

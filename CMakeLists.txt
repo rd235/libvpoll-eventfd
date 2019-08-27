@@ -2,9 +2,12 @@ cmake_minimum_required(VERSION 3.12)
 project(vpoll
 		VERSION 0.0.1
 		DESCRIPTION "generate synthetic events for poll/select/ppoll/pselect/epoll"
-		HOMEPAGE_URL "https://github.com/rd235/libvpoll-eventfd")
+		HOMEPAGE_URL "https://github.com/rd235/libvpoll-eventfd"
+		LANGUAGES C)
+
 include(GNUInstallDirs)
 add_definitions(-D_GNU_SOURCE)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 if (PROJECT_INCLUDEDIR)
