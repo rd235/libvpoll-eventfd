@@ -34,7 +34,7 @@ vpoll_create, vpoll_ctl, vpoll_close \- generate synthetic events for poll/selec
 .P
 \fBint vpoll_close(int\fR \fIfd\fR\fB);\fR
 .SH "DESCRIPTION"
-This library permits to create a vpoll file descriptor "vpollfd" that can be used in poll/select/ppoll/pselect/epoll(2) system calls\. The events reported by a can be controlled by \fBvpoll_ctl\fR\. \fBvpoll\fR encodes the events using the same flags EPOLL* defined in \fBepoll_ctl(2)\fR\.
+This library permits one to create a vpoll file descriptor "vpollfd" that can be used in poll/select/ppoll/pselect/epoll(2) system calls\. The events reported by a can be controlled by \fBvpoll_ctl\fR\. \fBvpoll\fR encodes the events using the same flags EPOLL* defined in \fBepoll_ctl(2)\fR\.
 .P
 The library uses the vpoll extension for eventfd if the kernel provides it otherwise it (partially) emulates the feature using socketpair(2)\. The emulation supports only \fBEPOLLIN\fR, \fBEPOLLOUT\fR flags and a non standard version of EPOLLHUP/EPOLLRDHUP\.
 .TP
