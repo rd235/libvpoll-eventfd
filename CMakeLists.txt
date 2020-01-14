@@ -7,7 +7,7 @@ project(vpoll
 
 include(GNUInstallDirs)
 add_definitions(-D_GNU_SOURCE)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -pedantic -O2 -D_FORTIFY_SOURCE=2")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 if (PROJECT_INCLUDEDIR)
