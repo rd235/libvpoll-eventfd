@@ -21,12 +21,20 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <sys/ioctl.h>
 #include <vpoll.h>
 #include <fduserdata.h>
 
+#define VPOLLDEV "/dev/vpoll"
+#ifndef EFD_VPOLL
 #define EFD_VPOLL (1 << 1)
+#endif
+#ifndef VPOLL_IOC_MAGIC
+#define VPOLL_IOC_MAGIC '^'
+#endif
 
-static FDUSERDATA *fdtable;
+static FDUSERDATA *fdtable = NULL;
+static int vpolldev = 0;
 
 /************************************ emulation mode ************************************/
 static int vpollemu_create(uint32_t init_events, int flags);
@@ -38,6 +46,9 @@ static int vpollemu_ctl(int fd, int op, uint32_t events);
 int vpoll_create(uint32_t init_events, int flags) {
 	if (__builtin_expect(fdtable != NULL, 0))
 		return vpollemu_create(init_events, flags);
+	else if (vpolldev)
+		return open(VPOLLDEV, O_RDWR | 
+				(flags & FD_CLOEXEC ? O_CLOEXEC : 0));
 	else
 		return eventfd(0, EFD_VPOLL |
 				(flags & FD_CLOEXEC ? EFD_CLOEXEC : 0));
@@ -53,6 +64,8 @@ int vpoll_close(int fd) {
 int vpoll_ctl(int fd, int op, uint32_t events) {
 	if (__builtin_expect(fdtable != NULL, 0))
 		return vpollemu_ctl(fd, op, events);
+	else if (vpolldev)
+		return ioctl(fd, _IO(VPOLL_IOC_MAGIC, op), events);
 	else {
 		uint64_t request = (((uint64_t) op) << 32) | events;
 		return write(fd, &request, sizeof(request)) >= 0 ? 0 : -1;
@@ -142,13 +155,19 @@ static int vpollemu_ctl(int fd, int op, uint32_t events) {
 /************************************ init/fini ************************************/
 __attribute__((constructor))
 	static void vpollemu_init() {
-		/* switch to emulation mode if EFD_VPOLL isnot supported(yet). */
-		int testfd = eventfd(0, EFD_VPOLL);
-		if (testfd < 0)
-			fdtable = fduserdata_create(0);
-		else {
+		/* use eventfd EFD_VPOLL when available */
+		int testfd = eventfd(0, EFD_VPOLL | EFD_CLOEXEC);
+		if (testfd >= 0)
 			close(testfd);
-			fdtable = NULL;
+		else {
+		/* switch to device module mode */
+			int testfd = open(VPOLLDEV, O_RDWR | O_CLOEXEC);
+			if (testfd >= 0) {
+				vpolldev = 1;
+				close(testfd);
+			} else
+		/* switch to emulation mode if EFD_VPOLL or "/dev/vpoll" are not supported(yet). */
+				fdtable = fduserdata_create(0);
 		}
 	}
 
