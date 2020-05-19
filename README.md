@@ -466,7 +466,7 @@ Run the following command (the current working directory must be the root of the
 patch -p 1 < /path/of/this/git/clone/linux_patch/linux_patch_v5.2-rc6
 ```
 
-configure, compile anda install the kernel as usual.
+configure, compile and install the kernel as usual.
 
 ### libvpoll
 

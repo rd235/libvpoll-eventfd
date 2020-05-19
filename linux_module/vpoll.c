@@ -10,7 +10,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Renzo Davoli");
-MODULE_DESCRIPTION("vpoll: sythesize event for select/poll/epoll");
+MODULE_DESCRIPTION("vpoll: sythesize events for select/poll/epoll");
 MODULE_VERSION("0.01");
 
 #define NAME "vpoll"
