@@ -5,7 +5,10 @@
 This repository includes two components:
 
 * a patch for the Linux kernel to provide a new feature: eventfd-vpoll
-* a library providing a nice interface to the new feature as well as an emulator in user space (which supports only some of the events, it is for backwards compatibility).
+* a kernel module (vpoll.ko) providing an alternative implementation of the same feature as a device (dev/vpoll)
+* a library providing a nice interface to the new feature (it uses the extended eventfd or
+the device whatever is available) as well as an emulator in user space (which supports only some of the events,
+it is for backwards compatibility).
 
 ## the problem:
 
