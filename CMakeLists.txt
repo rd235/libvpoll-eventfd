@@ -33,3 +33,6 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vpoll.pc
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 add_subdirectory(man)
+
+add_custom_target(uninstall
+  "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/Uninstall.cmake")
