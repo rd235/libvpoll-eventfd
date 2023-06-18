@@ -7,6 +7,7 @@
 #include <linux/poll.h>
 #include <linux/wait.h>
 #include <linux/module.h>
+#include <linux/version.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Renzo Davoli");
@@ -94,7 +95,11 @@ static const struct file_operations fops = {
 		.poll = vpoll_poll,
 };
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
 static char *vpoll_devnode(struct device *dev, umode_t *mode)
+#else
+static char *vpoll_devnode(const struct device *dev, umode_t *mode)
+#endif
 {
     if (!mode)
             return NULL;
