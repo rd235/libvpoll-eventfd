@@ -149,6 +149,7 @@ static int vpollemu_ctl(int fd, int op, uint32_t events) {
 			emu_update_events(fd, *datafd, events, ~events);
 			break;
 		default: errno = EINVAL;
+						 fduserdata_put(datafd);
 						 return -1;
 	}
 	fduserdata_put(datafd);
