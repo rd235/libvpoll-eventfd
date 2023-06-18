@@ -107,6 +107,12 @@ static char *vpoll_devnode(const struct device *dev, umode_t *mode)
     return NULL;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
+#define vpoll_class_create() class_create(NAME)
+#else
+#define vpoll_class_create() class_create(THIS_MODULE, NAME)
+#endif
+
 static int myinit(void)
 {
     int ret;
@@ -114,7 +120,7 @@ static int myinit(void)
 
     if ((ret = alloc_chrdev_region(&major, 0, 1, NAME)) < 0)
         return ret;
-		vpoll_class = class_create(THIS_MODULE, NAME);
+		vpoll_class = vpoll_class_create();
 		if (IS_ERR(vpoll_class)) {
 			ret = PTR_ERR(vpoll_class);
 			goto error_unregister_chrdev_region;
