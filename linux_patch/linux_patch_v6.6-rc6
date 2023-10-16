@@ -1,0 +1,215 @@
+commit 1e749ccab7f92e6f738f6e187cc3f27037d95dfd
+Author: Renzo Davoli <renzo@cs.unibo.it>
+Date:   Mon Oct 16 15:01:46 2023 +0200
+
+    add eventfd-vpoll
+
+diff --git a/fs/eventfd.c b/fs/eventfd.c
+index 33a918f9566c..ad4b555a02b5 100644
+--- a/fs/eventfd.c
++++ b/fs/eventfd.c
+@@ -25,18 +25,32 @@
+ #include <linux/idr.h>
+ #include <linux/uio.h>
+ 
++#define EPOLLALLMASK64 ((__force __u64)EPOLLALLMASK)
++
+ static DEFINE_IDA(eventfd_ida);
+ 
+ struct eventfd_ctx {
+ 	struct kref kref;
+ 	wait_queue_head_t wqh;
+ 	/*
+-	 * Every time that a write(2) is performed on an eventfd, the
+-	 * value of the __u64 being written is added to "count" and a
+-	 * wakeup is performed on "wqh". If EFD_SEMAPHORE flag was not
+-	 * specified, a read(2) will return the "count" value to userspace,
+-	 * and will reset "count" to zero. The kernel side eventfd_signal()
+-	 * also, adds to the "count" counter and issue a wakeup.
++	 *  * If the EFD_VPOLL flag was NOT set at eventfd creation:
++	 *   Every time that a write(2) is performed on an eventfd, the
++	 *   value of the __u64 being written is added to "count" and a
++	 *   wakeup is performed on "wqh". A read(2) will return the "count"
++	 *   value to userspace, and will reset "count" to zero (or decrement
++	 *   "count" by 1 if the flag EFD_SEMAPHORE has been set). The kernel
++	 *   side eventfd_signal() also, adds to the "count" counter and
++	 *   issue a wakeup.
++	 *
++	 * If the EFD_VPOLL flag was set at eventfd creation:
++	 *   count is the set of pending EPOLL events.
++	 *   read(2) returns the current value of count.
++	 *   The argument of write(2) is an 8-byte integer:
++	 *   it is an or-composition of a control command (EFD_VPOLL_ADDEVENTS,
++	 *   EFD_VPOLL_DELEVENTS or EFD_VPOLL_MODEVENTS) and the bitmap of
++	 *   events to be added, deleted to the current set of pending events.
++	 *   (i.e. which bits of "count" must be set or reset).
++	 *   EFD_VPOLL_MODEVENTS redefines the set of pending events.
+ 	 */
+ 	__u64 count;
+ 	unsigned int flags;
+@@ -291,6 +305,78 @@ static ssize_t eventfd_write(struct file *file, const char __user *buf, size_t c
+ 	return res;
+ }
+ 
++static __poll_t eventfd_vpoll_poll(struct file *file, poll_table *wait)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	__poll_t events = 0;
++	u64 count;
++
++	poll_wait(file, &ctx->wqh, wait);
++
++	count = READ_ONCE(ctx->count);
++
++	events = (((__force __poll_t)count) & EPOLLALLMASK);
++
++	return events;
++}
++
++static ssize_t eventfd_vpoll_read(struct file *file, char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	ssize_t res;
++	__u64 ucnt = 0;
++
++	if (count < sizeof(ucnt))
++		return -EINVAL;
++	res = sizeof(ucnt);
++	ucnt = READ_ONCE(ctx->count);
++	if (put_user(ucnt, (__u64 __user *)buf))
++		return -EFAULT;
++
++	return res;
++}
++
++static ssize_t eventfd_vpoll_write(struct file *file, const char __user *buf,
++		size_t count, loff_t *ppos)
++{
++	struct eventfd_ctx *ctx = file->private_data;
++	ssize_t res;
++	__u64 ucnt;
++	__u32 events;
++
++	if (count < sizeof(ucnt))
++		return -EINVAL;
++	if (copy_from_user(&ucnt, buf, sizeof(ucnt)))
++		return -EFAULT;
++	spin_lock_irq(&ctx->wqh.lock);
++
++	events = ucnt & EPOLLALLMASK64;
++	res = sizeof(ucnt);
++	switch (ucnt & ~EPOLLALLMASK64) {
++	case EFD_VPOLL_ADDEVENTS:
++		ctx->count |= events;
++		break;
++	case EFD_VPOLL_DELEVENTS:
++		ctx->count &= ~(events);
++		break;
++	case EFD_VPOLL_MODEVENTS:
++		ctx->count = (ctx->count & ~EPOLLALLMASK64) | events;
++		break;
++	default:
++		res = -EINVAL;
++	}
++
++	/* wake up waiting threads */
++	if (res >= 0 && waitqueue_active(&ctx->wqh))
++		wake_up_locked_poll(&ctx->wqh, ((__force __poll_t)ctx->count) & EPOLLALLMASK);
++
++	spin_unlock_irq(&ctx->wqh.lock);
++
++	return res;
++
++}
++
+ #ifdef CONFIG_PROC_FS
+ static void eventfd_show_fdinfo(struct seq_file *m, struct file *f)
+ {
+@@ -317,6 +403,17 @@ static const struct file_operations eventfd_fops = {
+ 	.llseek		= noop_llseek,
+ };
+ 
++static const struct file_operations eventfd_vpoll_fops = {
++#ifdef CONFIG_PROC_FS
++	.show_fdinfo	= eventfd_show_fdinfo,
++#endif
++	.release	= eventfd_release,
++	.poll		= eventfd_vpoll_poll,
++	.read		= eventfd_vpoll_read,
++	.write		= eventfd_vpoll_write,
++	.llseek		= noop_llseek,
++};
++
+ /**
+  * eventfd_fget - Acquire a reference of an eventfd file descriptor.
+  * @fd: [in] Eventfd file descriptor.
+@@ -389,6 +486,7 @@ EXPORT_SYMBOL_GPL(eventfd_ctx_fileget);
+ static int do_eventfd(unsigned int count, int flags)
+ {
+ 	struct eventfd_ctx *ctx;
++	const struct file_operations *fops = &eventfd_fops;
+ 	struct file *file;
+ 	int fd;
+ 
+@@ -409,13 +507,17 @@ static int do_eventfd(unsigned int count, int flags)
+ 	ctx->flags = flags;
+ 	ctx->id = ida_simple_get(&eventfd_ida, 0, 0, GFP_KERNEL);
+ 
++	if (flags & EFD_VPOLL) {
++		fops = &eventfd_vpoll_fops;
++		ctx->count &= EPOLLALLMASK64;
++	}
+ 	flags &= EFD_SHARED_FCNTL_FLAGS;
+ 	flags |= O_RDWR;
+ 	fd = get_unused_fd_flags(flags);
+ 	if (fd < 0)
+ 		goto err;
+ 
+-	file = anon_inode_getfile("[eventfd]", &eventfd_fops, ctx, flags);
++	file = anon_inode_getfile("[eventfd]", fops, ctx, flags);
+ 	if (IS_ERR(file)) {
+ 		put_unused_fd(fd);
+ 		fd = PTR_ERR(file);
+diff --git a/include/linux/eventfd.h b/include/linux/eventfd.h
+index b9d83652c097..ce007aa51ede 100644
+--- a/include/linux/eventfd.h
++++ b/include/linux/eventfd.h
+@@ -24,7 +24,11 @@
+  * shared O_* flags.
+  */
+ #define EFD_SHARED_FCNTL_FLAGS (O_CLOEXEC | O_NONBLOCK)
+-#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE)
++#define EFD_FLAGS_SET (EFD_SHARED_FCNTL_FLAGS | EFD_SEMAPHORE | EFD_VPOLL)
++
++#define EFD_VPOLL_ADDEVENTS (1ULL << 32)
++#define EFD_VPOLL_DELEVENTS (2ULL << 32)
++#define EFD_VPOLL_MODEVENTS (3ULL << 32)
+ 
+ struct eventfd_ctx;
+ struct file;
+diff --git a/include/uapi/linux/eventfd.h b/include/uapi/linux/eventfd.h
+index 2eb9ab6c32f3..ce9a62fe5b1f 100644
+--- a/include/uapi/linux/eventfd.h
++++ b/include/uapi/linux/eventfd.h
+@@ -5,6 +5,7 @@
+ #include <linux/fcntl.h>
+ 
+ #define EFD_SEMAPHORE (1 << 0)
++#define EFD_VPOLL (1 << 1)
+ #define EFD_CLOEXEC O_CLOEXEC
+ #define EFD_NONBLOCK O_NONBLOCK
+ 
+diff --git a/include/uapi/linux/eventpoll.h b/include/uapi/linux/eventpoll.h
+index cfbcc4cc49ac..f3c53aeb4a76 100644
+--- a/include/uapi/linux/eventpoll.h
++++ b/include/uapi/linux/eventpoll.h
+@@ -47,6 +47,8 @@
+  */
+ #define EPOLL_URING_WAKE	((__force __poll_t)(1U << 27))
+ 
++#define EPOLLALLMASK	((__force __poll_t)0x0fffffff)
++
+ /* Set exclusive wakeup mode for the target file descriptor */
+ #define EPOLLEXCLUSIVE	((__force __poll_t)(1U << 28))
+ 

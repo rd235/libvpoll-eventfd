@@ -2,7 +2,7 @@
 
 **generate synthetic events for poll/select/ppoll/pselect/epoll.**
 
-This repository includes two components:
+This repository includes three components:
 
 * a patch for the Linux kernel to provide a new feature: eventfd-vpoll
 * a kernel module (vpoll.ko) providing an alternative implementation of the same feature as a device (dev/vpoll)
