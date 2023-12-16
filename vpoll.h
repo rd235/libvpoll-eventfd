@@ -22,11 +22,14 @@
  *      // VPOLL_CTL_SETEVENTS sets all the pending event map
  *      // close vpollfd when it is no longer needed:
  *      vpoll_close(vpollfd);
- *     
- *   This library uses the EFD_VPOLL flag of eventfd(2) where available, otherwise it implements
- *   a user-space emulation based on socketpair(2).
- *   While eventfd provide full support to all the EPOLL events (including those not defined yet),
- *   the emulation code supports EPOLLIN, EPOLLOUT, EPOLLHUP only.
+ *
+ *   This library uses the EFD_VPOLL flag of eventfd(2) where available, or the
+ *   /dev/vpoll device implemented by the vpoll kernel module.
+ *   When neither of the kernel supports are available the libvpoll library
+ *   implements a (partial) user-space emulation based on socketpair(2).
+ *   While eventfd and the vpoll device provide full support to all the EPOLL events
+ *   (including those not yet defined), the emulation code supports EPOLLIN, EPOLLOUT,
+ *   EPOLLHUP only.
  *   (in emulation mode it is not possible to file further events after an EPOLLHUP).
  */
 

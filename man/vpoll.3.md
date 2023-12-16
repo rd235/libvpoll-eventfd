@@ -44,8 +44,10 @@ poll/select/ppoll/pselect/epoll(2) system calls.
 The events reported by a can be controlled by `vpoll_ctl`. `vpoll` encodes the events using the same flags
 EPOLL* defined in `epoll_ctl(2)`.
 
-The library uses the vpoll extension for eventfd if the kernel provides it otherwise it (partially)
-emulates the feature using socketpair(2). The emulation supports only `EPOLLIN`, `EPOLLOUT` flags and a non standard
+The library uses the vpoll extension for eventfd if the kernel provides it or the vpoll device
+implemented by the vpoll kernel module.
+When neither of the kernel supports are available the libvpoll library (partially)
+emulates the vpoll feature using socketpair(2). This emulation supports only `EPOLLIN`, `EPOLLOUT` flags and a non standard
 version of EPOLLHUP/EPOLLRDHUP.
 
   `vpoll_create`
@@ -142,7 +144,7 @@ int main(int argc, char *argv[]) {
 }
 ```
 
-On a machine running a Linux Kernel providing eventfd/vpoll the output of this program is:
+On a machine running a Linux Kernel providing eventfd/vpoll or the vpoll device the output of this program is:
 
 ```
 timeout
