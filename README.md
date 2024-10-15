@@ -81,7 +81,7 @@ bitmap of events to be added, deleted to the current set of pending events.
 e.g.:
 
     uint64_t request = EFD_VPOLL_ADDEVENTS | EPOLLIN | EPOLLPRI;
-		write(fd, &request, sizeof(request);
+		write(fd, &request, sizeof(request));
 
 adds EPOLLIN and EPOLLPRI to the set of pending events.
 
